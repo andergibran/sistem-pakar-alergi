@@ -41,7 +41,7 @@ def kat_label(kat: str) -> str:
 
 
 def status_chips() -> str:
-        n_usulan = 0
+    n_usulan = 0
     return (T.chip(f"{len(kb.allergies)} jenis alergi", "teal") + T.chip(f"{len(kb.indicators)} gejala dan pemicu", "teal")
             + (T.chip(f"{n_usulan} indikator usulan belum diverifikasi pakar", "amber") if n_usulan else ""))
 
