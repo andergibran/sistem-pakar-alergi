@@ -101,6 +101,21 @@ button:focus-visible{ outline:3px solid #7CC9C5 !important; outline-offset:2px; 
 .result-hero .name{ font-family:'Newsreader',Georgia,serif; font-size:2rem; line-height:1.15; color:var(--ink); }
 .result-hero .meta{ margin-top:.8rem; }
 
+/* angka hasil dan peringkat */
+.result-hero .row{ display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; flex-wrap:wrap; }
+.result-hero .big{ font-family:'Newsreader',Georgia,serif; font-size:2.8rem; line-height:1; color:var(--teal-dark); text-align:right; }
+.result-hero .bigcap{ color:var(--muted); font-size:.85rem; text-align:right; }
+.rank{ display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,2fr) 64px; gap:1rem; align-items:center;
+  padding:.75rem 0; border-bottom:1px solid var(--line); }
+.rank:last-child{ border-bottom:0; }
+.rank .nm{ font-weight:600; color:var(--ink); }
+.rank .nm .d{ display:block; font-weight:400; color:var(--muted); font-size:.82rem; }
+.rank .bar{ height:10px; background:var(--teal-soft); border-radius:6px; overflow:hidden; }
+.rank .bar .f{ display:block; height:100%; background:var(--teal); border-radius:6px; }
+.rank.lead .bar .f{ background:var(--teal-dark); }
+.rank .pc{ text-align:right; font-weight:700; }
+@media (max-width:640px){ .rank{ grid-template-columns:minmax(0,1fr) 56px; } .rank .bar{ grid-column:1 / -1; order:3; } }
+
 /* ringkasan pilihan */
 .rankbox{ background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:.4rem 1.2rem; }
 .ans{ display:flex; justify-content:space-between; gap:1rem; padding:.45rem 0; border-bottom:1px dashed var(--line); font-size:.93rem; }
@@ -160,17 +175,32 @@ def meta_chips(r) -> str:
         chip(f"Tipe: {TIPE_ID.get(r.tipe, r.tipe)}", "teal")
         + chip(f"Potensi keparahan: {KEPARAHAN_ID.get(str(r.keparahan).lower(), r.keparahan)}", severity_kind(r.keparahan))
         + chip(f"Prevalensi: {PREVALENSI_ID.get(str(r.prevalensi).lower(), r.prevalensi)}")
-        + chip(f"Gejala cocok: {len(r.cocok)} dari {r.n_indikator}")
+        + chip(f"Aturan terpenuhi: {r.n_fired} dari {r.n_total}")
     )
 
 
-def result_hero(r, label: str = "Kemungkinan jenis alergimu") -> str:
+def result_hero(r, label: str = "Kemungkinan jenis alergimu", conf: str = "") -> str:
     return (
-        '<div class="result-hero">'
+        '<div class="result-hero"><div class="row"><div>'
         f'<div class="kicker">{escape(label)}</div>'
-        f'<div class="name">{escape(r.nama)}</div>'
+        f'<div class="name">{escape(r.nama)}</div></div>'
+        f'<div><div class="big">{r.cf * 100:.0f}%</div>'
+        f'<div class="bigcap">Tingkat keyakinan: {escape(conf)}</div></div></div>'
         f'<div class="meta">{meta_chips(r)}</div></div>'
     )
+
+
+def rank_rows(results, top_n: int = 5) -> str:
+    rows = []
+    for i, r in enumerate(results[:top_n]):
+        lead = " lead" if i == 0 else ""
+        rows.append(
+            f'<div class="rank{lead}"><div class="nm">{escape(r.nama)}'
+            f'<span class="d">{escape(TIPE_ID.get(r.tipe, r.tipe))}, {r.n_fired} dari {r.n_total} aturan terpenuhi</span></div>'
+            f'<div class="bar"><span class="f" style="width:{min(r.cf, 1) * 100:.1f}%"></span></div>'
+            f'<div class="pc">{r.cf * 100:.1f}%</div></div>'
+        )
+    return f'<div class="rankbox">{"".join(rows)}</div>'
 
 
 def answers_summary(items: list[tuple[str, str]]) -> str:
