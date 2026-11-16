@@ -9,7 +9,9 @@ Alur:
   2. FC      : aturan "JIKA indikator MAKA jenis alergi" terpenuhi bila indikatornya ada di fakta.
   3. CF      : CF aturan = CF pakar x CF pengguna; CF aturan-aturan yang terpenuhi untuk satu alergi
                digabung berurutan: CF1 + CF2 x (1 - CF1).
-  4. Hasil   : jenis alergi diurutkan menurut CF gabungan.
+  4. Validasi: hasil hanya ditampilkan bila >= KONSISTENSI_MIN pilihan cocok dengan jenis alergi teratas
+               (pilihan sembarang yang tidak sesuai ciri alergi mana pun tidak menghasilkan jawaban).
+  5. Hasil   : jenis alergi diurutkan menurut CF gabungan.
 Modul ini murni Python/pandas, tanpa Streamlit.
 """
 from __future__ import annotations
@@ -23,6 +25,8 @@ BOBOT_MIN = 0.1
 RED_FLAG_KEYWORDS = ("anaphylaxis", "sesak napas", "mengi")
 CLOSE_MARGIN = 0.05        # selisih CF dua teratas yang dianggap berdekatan
 CF_USER_DEFAULT = 0.8      # keyakinan pengguna bila hanya mencentang ("Yakin")
+KONSISTENSI_MIN = 0.8      # hasil hanya ditampilkan bila >= 80% pilihan cocok dengan jenis alergi teratas
+MIN_PILIHAN = 2            # jumlah minimal pemicu/gejala yang dipilih
 
 
 @dataclass
@@ -188,6 +192,18 @@ def red_flags(kb: KnowledgeBase, selected) -> list[str]:
     ind = kb.indicators
     return [r["nama"] for _, r in ind[ind["kode"].isin(facts.keys())].iterrows()
             if any(k in str(r["nama"]).lower() for k in RED_FLAG_KEYWORDS)]
+
+
+def tingkat_konsistensi(results: list["Result"], n_dipilih: int) -> float:
+    """Bagian pilihan pengguna yang cocok dengan jenis alergi teratas (0..1)."""
+    if not results or n_dipilih <= 0:
+        return 0.0
+    return results[0].n_fired / n_dipilih
+
+
+def hasil_valid(results: list["Result"], n_dipilih: int) -> bool:
+    """Pilihan dianggap konsisten bila cukup banyak dan hampir semuanya cocok dengan satu jenis alergi."""
+    return n_dipilih >= MIN_PILIHAN and tingkat_konsistensi(results, n_dipilih) >= KONSISTENSI_MIN - 1e-9
 
 
 def top_close(results: list[Result]) -> bool:
