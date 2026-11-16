@@ -1,6 +1,6 @@
 """
 Sistem Pakar Identifikasi Awal Jenis Alergi
-Metode: pencocokan gejala langsung (tanpa basis aturan) | Antarmuka: Streamlit
+Metode: Forward Chaining + Certainty Factor | Antarmuka: Streamlit
 
 Jalankan:  streamlit run app.py
 """
@@ -8,6 +8,7 @@ from pathlib import Path
 
 from html import escape
 
+import pandas as pd
 import streamlit as st
 
 import engine as E
@@ -41,14 +42,12 @@ def kat_label(kat: str) -> str:
 
 
 def status_chips() -> str:
-    n_usulan = 0
-    return (T.chip(f"{len(kb.allergies)} jenis alergi", "teal") + T.chip(f"{len(kb.indicators)} gejala dan pemicu", "teal")
-            + (T.chip(f"{n_usulan} indikator usulan belum diverifikasi pakar", "amber") if n_usulan else ""))
+    return T.chip(f"{len(kb.allergies)} jenis alergi", "teal") + T.chip(f"{len(kb.indicators)} gejala dan pemicu", "teal")
 
 
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:
-    st.markdown('<div class="brand">Identifikasi Awal Alergi<small>Sistem pakar pencocokan gejala</small></div>',
+    st.markdown('<div class="brand">Identifikasi Awal Alergi<small>Sistem pakar Forward Chaining dan Certainty Factor</small></div>',
                 unsafe_allow_html=True)
     st.write("")
     page = st.radio("Menu", ["Konsultasi", "Basis pengetahuan", "Metode dan rujukan"], label_visibility="collapsed")
@@ -62,7 +61,7 @@ def render_form() -> None:
     st.markdown(T.hero(
         "Cari tahu kemungkinan jenis alergimu",
         "Centang pemicu dan gejala yang kamu alami. Sistem mencocokkannya dengan ciri tiap jenis alergi "
-        "lalu menampilkan yang paling mirip.", status_chips()), unsafe_allow_html=True)
+        "lalu menghitung jenis alergi yang paling mungkin.", status_chips()), unsafe_allow_html=True)
     st.markdown(T.alert("info", "Cara menjawab",
                         "Centang hanya yang benar-benar kamu alami. Tidak perlu mengisi semuanya. "
                         "Makin lengkap yang kamu centang, makin tajam hasilnya."), unsafe_allow_html=True)
@@ -98,7 +97,7 @@ def render_form() -> None:
         if not selected:
             st.warning("Belum ada yang dicentang. Pilih minimal satu pemicu atau gejala.")
             return
-        st.session_state.hasil = {"selected": selected, "results": E.infer(kb, selected)}
+        st.session_state.hasil = {"selected": selected, "results": E.infer(kb, selected), "flags": E.red_flags(kb, selected)}
         st.rerun()
 
 
@@ -130,51 +129,75 @@ def render_result() -> None:
     names = kb.indicators.set_index("kode")["nama"]
 
     st.markdown(T.hero("Hasil identifikasi awal",
-                       "Hasil dihitung dari pemicu dan gejala yang kamu centang.",
+                       "Hasil dihitung dari pemicu dan gejala yang kamu centang. Buka rincian untuk melihat aturan yang dipakai.",
                        status_chips()), unsafe_allow_html=True)
 
+    if h.get("flags"):
+        st.markdown(T.alert(
+            "danger", "Tanda bahaya terdeteksi",
+            "Kamu memilih " + ", ".join(h["flags"]).lower() + ". Gejala seperti ini bisa menjadi tanda reaksi alergi berat "
+            "(anafilaksis). Segera ke IGD terdekat atau hubungi layanan darurat setempat, jangan menunggu hasil aplikasi ini."),
+            unsafe_allow_html=True)
+
     if not results:
-        st.markdown(T.alert("warn", "Pilihanmu tidak valid menurut basis pengetahuan",
-                            "Tidak ada jenis alergi yang memiliki satu pun dari pemicu dan gejala yang kamu centang. "
-                            "Kemungkinan ada salah centang, atau keluhanmu bukan alergi yang ada di data. "
+        st.markdown(T.alert("warn", "Tidak ada aturan yang terpenuhi",
+                            "Tidak ada jenis alergi yang memiliki aturan untuk pemicu atau gejala yang kamu centang. "
                             "Periksa kembali pilihanmu, atau konsultasikan ke dokter."), unsafe_allow_html=True)
         tombol_rujuk_ulang("kosong")
         return
 
     top = results[0]
-    seri = [r for r in results if abs(r.skor - top.skor) < 1e-9]
-    kurang_cocok = top.tidak_cocok
-    skor_rendah = top.skor < 0.40
+    st.markdown(T.result_hero(top, "Kemungkinan terkuat dari pilihanmu", E.confidence_label(top.cf)), unsafe_allow_html=True)
 
-    if kurang_cocok:
-        daftar = ", ".join(kurang_cocok)
-        st.markdown(T.alert(
-            "warn", "Ada pilihan yang tidak sesuai dengan ciri alergi teratas",
-            f"Menurut basis pengetahuan, {escape(daftar)} bukan ciri khas {escape(top.nama)}. "
-            "Bisa jadi salah centang, atau gejalanya memang tidak khas untuk jenis alergi ini. "
-            "Hasil di bawah hanya yang paling mendekati. Periksa kembali lalu ubah pilihanmu bila perlu.",
-            body_is_html=True), unsafe_allow_html=True)
-    elif skor_rendah:
-        st.markdown(T.alert(
-            "warn", "Kecocokan masih rendah",
-            "Pilihanmu baru sedikit yang sesuai dengan ciri jenis alergi mana pun. "
-            "Tambahkan gejala lain yang kamu alami, atau periksa kembali pilihanmu."), unsafe_allow_html=True)
+    if E.top_close(results):
+        st.markdown(T.alert("warn", "Hasil teratas nilainya berdekatan",
+                            f"{escape(results[0].nama)} dan {escape(results[1].nama)} hampir setara. Gejala saja belum cukup "
+                            "membedakannya. Tambahkan pemicu atau gejala yang lebih khas, dan konsultasikan ke dokter.",
+                            body_is_html=True), unsafe_allow_html=True)
+    if top.n_fired == 1:
+        st.markdown(T.alert("info", "Bukti masih sedikit",
+                            "Hasil teratas baru didukung satu aturan. Tambahkan gejala dan pemicu lain agar hasil lebih tajam."),
+                    unsafe_allow_html=True)
+    if top.tidak_cocok:
+        st.markdown(T.alert("warn", "Ada pilihan yang tidak sesuai dengan alergi teratas",
+                            f"{escape(', '.join(top.tidak_cocok))} tidak punya aturan untuk {escape(top.nama)}. "
+                            "Bisa jadi salah centang, atau gejalanya memang tidak khas untuk jenis alergi ini.",
+                            body_is_html=True), unsafe_allow_html=True)
 
-    st.markdown(T.result_hero(top, "Jenis alergi yang paling mendekati" if (kurang_cocok or skor_rendah)
-                              else "Kemungkinan jenis alergimu"), unsafe_allow_html=True)
-    if len(seri) > 1:
-        st.markdown(T.alert(
-            "info", "Ada jenis alergi lain yang sama cocok",
-            "Dengan pilihanmu, data tidak bisa membedakan: " + ", ".join(escape(r.nama) for r in seri)
-            + ". Tambahkan gejala yang lebih khas agar hasilnya lebih jelas.",
-            body_is_html=True), unsafe_allow_html=True)
-    st.markdown(f"**Penanganan umum (dari data sumber):** {top.penanganan}")
-    st.markdown("**Cocok dengan pilihanmu:** " + ", ".join(top.cocok))
+    left, right = st.columns([3, 2], gap="large")
+    with left:
+        st.subheader("Peringkat kemungkinan")
+        st.markdown(T.rank_rows(results, 5), unsafe_allow_html=True)
+        st.caption("Persentase adalah tingkat keyakinan sistem (Certainty Factor), bukan peluang medis. "
+                   "Nilainya cenderung naik bila banyak aturan terpenuhi.")
+    with right:
+        st.subheader("Yang kamu pilih")
+        st.markdown(f'<div class="rankbox">{T.answers_summary([(names[g], "Dipilih") for g in h["selected"]])}</div>',
+                    unsafe_allow_html=True)
 
-    st.subheader("Yang kamu pilih")
-    st.markdown(f'<div class="rankbox">{T.answers_summary([(names[g], "Dipilih") for g in h["selected"]])}</div>',
-                unsafe_allow_html=True)
+    st.subheader("Rincian dan penjelasan")
+    for i, r in enumerate(results[:3]):
+        with st.expander(f"{r.nama}: {r.cf * 100:.1f}%", expanded=(i == 0)):
+            st.markdown(T.meta_chips(r), unsafe_allow_html=True)
+            st.markdown(f"**Penanganan umum (dari data sumber):** {r.penanganan}")
+            st.markdown("**Aturan yang terpenuhi oleh pilihanmu**")
+            df = pd.DataFrame([{"Aturan": f["aturan"], "Jika (indikator)": f["indikator"],
+                                "CF pakar": f"{f['cf']:.2f}", "Keyakinanmu": f"{f['cf_user']:.1f}",
+                                "CF aturan": f"{f['cf_aturan']:.3f}"} for f in r.fired]).set_index("Aturan")
+            st.table(df)
+            st.markdown("**Cara nilainya digabung** (dari CF aturan terbesar):")
+            for l in r.langkah:
+                st.markdown(f"- {l['aturan']}: {l['sebelum']:.3f} + {l['cf_aturan']:.3f} × (1 − {l['sebelum']:.3f}) = **{l['sesudah']:.3f}**")
+            if r.belum_dipilih:
+                st.markdown("**Ciri lain alergi ini yang belum kamu pilih:** " + ", ".join(r.belum_dipilih))
 
+    st.download_button("Unduh hasil (CSV)", E.results_to_frame(results).to_csv(index=False).encode("utf-8-sig"),
+                       file_name="hasil_identifikasi_alergi.csv", mime="text/csv")
+
+    if not kb.sepenuhnya_divalidasi:
+        st.markdown(T.alert("warn", "Catatan prototipe",
+                            "Nilai CF pakar belum diisi sehingga sistem memakai bobot awal dari data sumber. "
+                            "Hasil ini belum divalidasi pakar dan tidak boleh dipakai untuk keputusan medis."), unsafe_allow_html=True)
     st.markdown(T.alert("info", "Penting",
                         "Sistem ini alat skrining awal, bukan diagnosis. Jenis alergi yang pasti ditentukan dokter "
                         "lewat riwayat, pemeriksaan, dan tes alergi."), unsafe_allow_html=True)
@@ -184,9 +207,9 @@ def render_result() -> None:
 # ---------------------------------------------------------------- basis pengetahuan
 def render_kb() -> None:
     st.markdown(T.hero("Basis pengetahuan",
-                       "Jenis alergi, indikator, dan matriks yang dipakai untuk pencocokan. Data dibaca langsung dari file Excel.",
+                       "Jenis alergi, indikator, matriks, dan aturan beserta CF yang dipakai mesin inferensi. Data dibaca langsung dari file Excel.",
                        status_chips()), unsafe_allow_html=True)
-    t1, t2, t3 = st.tabs(["Jenis alergi", "Indikator", "Matriks X"])
+    t1, t2, t3, t4 = st.tabs(["Jenis alergi", "Indikator", "Matriks X", "Aturan dan CF"])
 
     with t1:
         df = kb.allergies[["kode", "nama", "tipe", "prevalensi", "keparahan", "penanganan"]].copy()
@@ -199,18 +222,27 @@ def render_kb() -> None:
     with t2:
         kat = st.selectbox("Kategori", ["Semua"] + list(kb.indicators["kategori"].drop_duplicates()))
         df = kb.indicators if kat == "Semua" else kb.indicators[kb.indicators["kategori"] == kat]
-        df = df[["kode", "nama", "kategori", "jumlah_alergi", "bobot", "status"]].copy()
-        df["bobot"] = df["bobot"].round(2)
-        df.columns = ["Kode", "Indikator", "Kategori", "Dimiliki (jenis alergi)", "Bobot", "Status"]
+        df = df[["kode", "nama", "kategori", "sumber", "status"]].copy()
+        df.columns = ["Kode", "Indikator", "Kategori", "Sumber", "Status"]
         st.dataframe(df, hide_index=True)
-        st.caption("Indikator berstatus \"Usulan\" belum diverifikasi pakar. Bobot lebih tinggi berarti indikator lebih khas.")
+        st.caption("Indikator berstatus \"Usulan\" belum diverifikasi pakar.")
 
     with t3:
         mat = kb.matrix.replace({1: "✓", 0: ""})
         mat.index.name = None
         mat.insert(0, "Jenis alergi", kb.allergies.set_index("kode")["nama"])
         st.dataframe(mat)
-        st.caption("Baris: jenis alergi. Kolom: kode indikator (lihat tab Indikator). ✓ berarti indikator berlaku.")
+        st.caption("Baris: jenis alergi. Kolom: kode indikator (lihat tab Indikator). ✓ berarti ada aturan untuk pasangan itu.")
+
+    with t4:
+        selisih = E.cek_konsistensi(kb)
+        if selisih:
+            st.warning("Aturan_CF dan Tabel3_Matriks tidak sama persis. Periksa: " + "; ".join(selisih[:5]))
+        pilih = st.selectbox("Jenis alergi", ["Semua"] + list(kb.allergies["nama"]))
+        df = kb.rules if pilih == "Semua" else kb.rules[kb.rules["alergi"] == pilih]
+        df = df[["aturan", "alergi", "indikator", "cf_awal", "cf_pakar", "cf", "validasi"]].copy()
+        df.columns = ["Aturan", "Maka (alergi)", "Jika (indikator)", "CF awal", "CF pakar", "CF dipakai", "Status validasi"]
+        st.dataframe(df, hide_index=True)
 
 
 # ---------------------------------------------------------------- metode
@@ -235,30 +267,43 @@ REFERENSI_METODE = [
 
 def render_metode() -> None:
     st.markdown(T.hero("Metode dan rujukan",
-                       "Cara sistem mencocokkan gejala, keterbatasannya, dan rujukan ilmiah yang mendasarinya.",
+                       "Cara sistem bernalar, status validasinya, keterbatasannya, dan rujukan ilmiahnya.",
                        status_chips()), unsafe_allow_html=True)
+
+    st.subheader("Status validasi pakar")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Jumlah aturan", kb.n_rules)
+    c2.metric("CF pakar terisi", f"{kb.pakar_terisi} dari {kb.n_rules}")
+    c3.metric("Aturan tervalidasi", f"{kb.tervalidasi} dari {kb.n_rules}")
+    if not kb.sepenuhnya_divalidasi:
+        st.markdown(T.alert("warn", "Belum sepenuhnya divalidasi",
+                            "Isi kolom \"CF pakar (isi)\" dan \"Status validasi pakar\" di sheet Aturan_CF bersama pakar, "
+                            "lalu jalankan ulang aplikasi."), unsafe_allow_html=True)
 
     st.subheader("Cara kerja")
     st.markdown(
-        "1. **Masukan.** Pengguna mencentang pemicu, waktu muncul, dan gejala yang dialami.\n"
-        "2. **Pencocokan.** Pilihan dibandingkan dengan ciri tiap jenis alergi pada matriks X (Excel). "
-        "Tidak ada aturan JIKA-MAKA terpisah, matriks itu sendiri yang menjadi basis pengetahuan.\n"
-        "3. **Skor.** Tiap alergi diberi skor kecocokan 0 sampai 1 (rumus di bawah).\n"
-        "4. **Keluaran.** Jenis alergi dengan skor tertinggi ditampilkan beserta penanganan umum dan gejala yang cocok.")
-    st.markdown("Bobot tiap indikator, makin jarang dimiliki alergi makin besar (lantai 0,1):")
-    st.latex(r"w_i = \max\left(0{,}1;\ 1 - \frac{n_i}{N}\right)")
-    st.markdown("Skor kecocokan alergi *k* terhadap pilihan *S* (weighted Dice), dengan *A* adalah ciri alergi *k*:")
-    st.latex(r"skor_k = \frac{2\sum_{i \in S \cap A_k} w_i}{\sum_{i \in S} w_i + \sum_{i \in A_k} w_i}")
+        "1. **Fakta masuk.** Pemicu dan gejala yang dicentang menjadi fakta (working memory). "
+        f"Setiap centang dianggap keyakinan {E.CF_USER_DEFAULT:.1f} (\"Yakin\").\n"
+        "2. **Forward Chaining.** Sistem memeriksa semua aturan *JIKA indikator MAKA jenis alergi*. "
+        "Aturan terpenuhi bila indikatornya ada di fakta.\n"
+        "3. **Certainty Factor.** Tiap aturan yang terpenuhi diberi CF, lalu digabung per jenis alergi.\n"
+        "4. **Keluaran.** Jenis alergi diurutkan menurut CF gabungan, disertai aturan yang dipakai dan peringatan tanda bahaya.")
+    st.latex(r"CF_{aturan} = CF_{pakar} \times CF_{pengguna}")
+    st.latex(r"CF_{gabungan} = CF_1 + CF_2 \times (1 - CF_1)")
+    st.markdown("CF pakar diisi pakar di sheet Aturan_CF. Bila kosong, dipakai CF awal yang dihitung dari seberapa jarang "
+                "indikator muncul di seluruh jenis alergi:")
+    st.latex(r"CF_{awal} = \max\left(0{,}1;\ 1 - \frac{n_i}{N}\right)")
     st.markdown("$n_i$ adalah jumlah jenis alergi yang memiliki indikator *i*, dan $N$ jumlah seluruh jenis alergi.")
 
     st.subheader("Keterbatasan")
     st.markdown(
         "- Basis pengetahuan berasal dari 20 jenis alergi dengan sedikit gejala tiap jenis, sehingga pemetaannya sederhana.\n"
         "- Indikator pemicu dan waktu muncul gejala adalah usulan penyusun dan perlu diverifikasi pakar.\n"
-        "- Bobot dihitung dari seberapa sering indikator muncul di data, bukan dari ukuran kekhasan klinis.\n"
+        "- Sebelum CF pakar diisi, bobot hanya mencerminkan kelangkaan indikator di data, bukan kekhasan klinis.\n"
         "- Dua alergi bisa bernilai sama persis bila ciri yang dipilih dimiliki keduanya (misalnya tungau debu dan bulu hewan "
         "untuk bersin, hidung meler, mata gatal). Itu keterbatasan data, bukan galat program.\n"
-        "- Skor bukan probabilitas. Sistem tidak menggantikan anamnesis, pemeriksaan fisik, dan tes alergi oleh dokter.")
+        "- CF gabungan cenderung tinggi bila banyak aturan terpenuhi. Nilainya bukan probabilitas.\n"
+        "- Sistem tidak menggantikan anamnesis, pemeriksaan fisik, dan tes alergi oleh dokter.")
 
     st.subheader("Rujukan klinis")
     st.markdown("".join(T.reference(t, d) for t, d in REFERENSI_KLINIS), unsafe_allow_html=True)
