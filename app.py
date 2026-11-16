@@ -94,8 +94,8 @@ def render_form() -> None:
 
     if submitted:
         selected = [r["kode"] for _, r in kb.indicators.iterrows() if st.session_state.get(f"g_{r['kode']}")]
-        if not selected:
-            st.warning("Belum ada yang dicentang. Pilih minimal satu pemicu atau gejala.")
+        if len(selected) < E.MIN_PILIHAN:
+            st.warning(f"Pilih minimal {E.MIN_PILIHAN} pemicu atau gejala yang kamu alami.")
             return
         st.session_state.hasil = {"selected": selected, "results": E.infer(kb, selected), "flags": E.red_flags(kb, selected)}
         st.rerun()
@@ -139,10 +139,14 @@ def render_result() -> None:
             "(anafilaksis). Segera ke IGD terdekat atau hubungi layanan darurat setempat, jangan menunggu hasil aplikasi ini."),
             unsafe_allow_html=True)
 
-    if not results:
-        st.markdown(T.alert("warn", "Tidak ada aturan yang terpenuhi",
-                            "Tidak ada jenis alergi yang memiliki aturan untuk pemicu atau gejala yang kamu centang. "
-                            "Periksa kembali pilihanmu, atau konsultasikan ke dokter."), unsafe_allow_html=True)
+    n_pilih = len(h["selected"])
+    if not results or not E.hasil_valid(results, n_pilih):
+        cocok = results[0].n_fired if results else 0
+        st.markdown(T.alert("warn", "Tidak ada jenis alergi yang cocok",
+                            f"Pilihanmu tidak konsisten dengan ciri jenis alergi mana pun di basis pengetahuan "
+                            f"(paling banyak {cocok} dari {n_pilih} pilihan yang cocok pada satu jenis alergi). "
+                            "Sistem tidak menampilkan hasil. Periksa kembali pilihanmu, atau konsultasikan ke dokter."),
+                    unsafe_allow_html=True)
         tombol_rujuk_ulang("kosong")
         return
 
@@ -287,7 +291,10 @@ def render_metode() -> None:
         "2. **Forward Chaining.** Sistem memeriksa semua aturan *JIKA indikator MAKA jenis alergi*. "
         "Aturan terpenuhi bila indikatornya ada di fakta.\n"
         "3. **Certainty Factor.** Tiap aturan yang terpenuhi diberi CF, lalu digabung per jenis alergi.\n"
-        "4. **Keluaran.** Jenis alergi diurutkan menurut CF gabungan, disertai aturan yang dipakai dan peringatan tanda bahaya.")
+        "4. **Validasi pilihan.** Hasil hanya ditampilkan bila pilihan cukup konsisten: minimal "
+        f"{E.MIN_PILIHAN} pilihan dan sedikitnya {E.KONSISTENSI_MIN:.0%} pilihan cocok dengan jenis alergi teratas. "
+        "Pilihan sembarang yang tidak sesuai ciri alergi mana pun tidak menghasilkan jawaban.\n"
+        "5. **Keluaran.** Jenis alergi diurutkan menurut CF gabungan, disertai aturan yang dipakai dan peringatan tanda bahaya.")
     st.latex(r"CF_{aturan} = CF_{pakar} \times CF_{pengguna}")
     st.latex(r"CF_{gabungan} = CF_1 + CF_2 \times (1 - CF_1)")
     st.markdown("CF pakar diisi pakar di sheet Aturan_CF. Bila kosong, dipakai CF awal yang dihitung dari seberapa jarang "
