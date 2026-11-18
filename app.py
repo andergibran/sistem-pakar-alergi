@@ -186,7 +186,7 @@ def render_result() -> None:
             st.markdown(f"**Penanganan umum (dari data sumber):** {r.penanganan}")
             st.markdown("**Aturan yang terpenuhi oleh pilihanmu**")
             df = pd.DataFrame([{"Aturan": f["aturan"], "Jika (indikator)": f["indikator"],
-                                "CF pakar": f"{f['cf']:.2f}", "Keyakinanmu": f"{f['cf_user']:.1f}",
+                                "Bobot aturan": f"{f['cf']:.2f}", "Keyakinanmu": f"{f['cf_user']:.1f}",
                                 "CF aturan": f"{f['cf_aturan']:.3f}"} for f in r.fired]).set_index("Aturan")
             st.table(df)
             st.markdown("**Cara nilainya digabung** (dari CF aturan terbesar):")
@@ -225,7 +225,7 @@ def render_kb() -> None:
         df = df[["kode", "nama", "kategori", "sumber", "status"]].copy()
         df.columns = ["Kode", "Indikator", "Kategori", "Sumber", "Status"]
         st.dataframe(df, hide_index=True)
-        st.caption("Indikator berstatus \"Usulan\" belum diverifikasi pakar.")
+        st.caption("Status \"Usulan\" berarti indikator disusun penyusun, bukan berasal dari data CSV.")
 
     with t3:
         mat = kb.matrix.replace({1: "✓", 0: ""})
@@ -240,8 +240,8 @@ def render_kb() -> None:
             st.warning("Aturan_CF dan Tabel3_Matriks tidak sama persis. Periksa: " + "; ".join(selisih[:5]))
         pilih = st.selectbox("Jenis alergi", ["Semua"] + list(kb.allergies["nama"]))
         df = kb.rules if pilih == "Semua" else kb.rules[kb.rules["alergi"] == pilih]
-        df = df[["aturan", "alergi", "indikator", "cf_awal", "cf_pakar", "cf", "validasi"]].copy()
-        df.columns = ["Aturan", "Maka (alergi)", "Jika (indikator)", "CF awal", "CF pakar", "CF dipakai", "Status validasi"]
+        df = df[["aturan", "alergi", "indikator", "cf"]].copy()
+        df.columns = ["Aturan", "Maka (alergi)", "Jika (indikator)", "Bobot aturan"]
         st.dataframe(df, hide_index=True)
 
 
@@ -267,17 +267,8 @@ REFERENSI_METODE = [
 
 def render_metode() -> None:
     st.markdown(T.hero("Metode dan rujukan",
-                       "Cara sistem bernalar, status validasinya, keterbatasannya, dan rujukan ilmiahnya.",
+                       "Cara sistem bernalar, keterbatasannya, dan rujukan ilmiah yang mendasarinya.",
                        status_chips()), unsafe_allow_html=True)
-
-    st.subheader("Status validasi pakar")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Jumlah aturan", kb.n_rules)
-    c2.metric("CF pakar terisi", f"{kb.pakar_terisi} dari {kb.n_rules}")
-    c3.metric("Aturan tervalidasi", f"{kb.tervalidasi} dari {kb.n_rules}")
-    st.markdown(T.alert("info", "Tentang nilai CF",
-                        "Nilai CF saat ini dihitung dari data sumber. Nilai dari pakar dapat diisi pada kolom \"CF pakar (isi)\" "
-                        "di sheet Aturan_CF, lalu jalankan ulang aplikasi."), unsafe_allow_html=True)
 
     st.subheader("Cara kerja")
     st.markdown(
@@ -290,18 +281,18 @@ def render_metode() -> None:
         f"{E.MIN_PILIHAN} pilihan dan sedikitnya {E.KONSISTENSI_MIN:.0%} pilihan cocok dengan jenis alergi teratas. "
         "Pilihan sembarang yang tidak sesuai ciri alergi mana pun tidak menghasilkan jawaban.\n"
         "5. **Keluaran.** Jenis alergi diurutkan menurut CF gabungan, disertai aturan yang dipakai dan peringatan tanda bahaya.")
-    st.latex(r"CF_{aturan} = CF_{pakar} \times CF_{pengguna}")
+    st.latex(r"CF_{aturan} = bobot_{aturan} \times CF_{pengguna}")
     st.latex(r"CF_{gabungan} = CF_1 + CF_2 \times (1 - CF_1)")
-    st.markdown("CF pakar diisi pakar di sheet Aturan_CF. Bila kosong, dipakai CF awal yang dihitung dari seberapa jarang "
-                "indikator muncul di seluruh jenis alergi:")
+    st.markdown("Nilai CF tiap aturan berasal dari basis pengetahuan (sheet Aturan_CF). Nilai awalnya dihitung dari seberapa jarang "
+                "indikator muncul di seluruh jenis alergi, sehingga gejala yang lebih khas berbobot lebih besar:")
     st.latex(r"CF_{awal} = \max\left(0{,}1;\ 1 - \frac{n_i}{N}\right)")
     st.markdown("$n_i$ adalah jumlah jenis alergi yang memiliki indikator *i*, dan $N$ jumlah seluruh jenis alergi.")
 
     st.subheader("Keterbatasan")
     st.markdown(
         "- Basis pengetahuan berasal dari 20 jenis alergi dengan sedikit gejala tiap jenis, sehingga pemetaannya sederhana.\n"
-        "- Indikator pemicu dan waktu muncul gejala adalah usulan penyusun dan perlu diverifikasi pakar.\n"
-        "- Sebelum CF pakar diisi, bobot hanya mencerminkan kelangkaan indikator di data, bukan kekhasan klinis.\n"
+        "- Pemicu dan waktu muncul gejala disusun penyusun berdasarkan nama alergen dan pedoman klinis (lihat rujukan), dan belum diuji pada kasus nyata.\n"
+        "- Bobot CF dihitung dari kelangkaan indikator di data, bukan dari pengukuran klinis.\n"
         "- Dua alergi bisa bernilai sama persis bila ciri yang dipilih dimiliki keduanya (misalnya tungau debu dan bulu hewan "
         "untuk bersin, hidung meler, mata gatal). Itu keterbatasan data, bukan galat program.\n"
         "- CF gabungan cenderung tinggi bila banyak aturan terpenuhi. Nilainya bukan probabilitas.\n"
