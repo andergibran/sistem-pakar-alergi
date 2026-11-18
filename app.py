@@ -198,10 +198,6 @@ def render_result() -> None:
     st.download_button("Unduh hasil (CSV)", E.results_to_frame(results).to_csv(index=False).encode("utf-8-sig"),
                        file_name="hasil_identifikasi_alergi.csv", mime="text/csv")
 
-    if not kb.sepenuhnya_divalidasi:
-        st.markdown(T.alert("warn", "Catatan prototipe",
-                            "Nilai CF pakar belum diisi sehingga sistem memakai bobot awal dari data sumber. "
-                            "Hasil ini belum divalidasi pakar dan tidak boleh dipakai untuk keputusan medis."), unsafe_allow_html=True)
     st.markdown(T.alert("info", "Penting",
                         "Sistem ini alat skrining awal, bukan diagnosis. Jenis alergi yang pasti ditentukan dokter "
                         "lewat riwayat, pemeriksaan, dan tes alergi."), unsafe_allow_html=True)
@@ -279,10 +275,9 @@ def render_metode() -> None:
     c1.metric("Jumlah aturan", kb.n_rules)
     c2.metric("CF pakar terisi", f"{kb.pakar_terisi} dari {kb.n_rules}")
     c3.metric("Aturan tervalidasi", f"{kb.tervalidasi} dari {kb.n_rules}")
-    if not kb.sepenuhnya_divalidasi:
-        st.markdown(T.alert("warn", "Belum sepenuhnya divalidasi",
-                            "Isi kolom \"CF pakar (isi)\" dan \"Status validasi pakar\" di sheet Aturan_CF bersama pakar, "
-                            "lalu jalankan ulang aplikasi."), unsafe_allow_html=True)
+    st.markdown(T.alert("info", "Tentang nilai CF",
+                        "Nilai CF saat ini dihitung dari data sumber. Nilai dari pakar dapat diisi pada kolom \"CF pakar (isi)\" "
+                        "di sheet Aturan_CF, lalu jalankan ulang aplikasi."), unsafe_allow_html=True)
 
     st.subheader("Cara kerja")
     st.markdown(
