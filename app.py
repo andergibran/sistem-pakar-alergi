@@ -34,9 +34,6 @@ except Exception as exc:
 if "hasil" not in st.session_state:
     st.session_state.hasil = None
 
-GEJALA_ORDER = ["Kulit", "Pernapasan", "Mata", "Pencernaan", "Sistemik"]
-
-
 def kat_label(kat: str) -> str:
     return kat.replace("Pemicu: ", "").capitalize()
 
@@ -67,29 +64,35 @@ def render_form() -> None:
                         "Makin lengkap yang kamu centang, makin tajam hasilnya."), unsafe_allow_html=True)
 
     groups = E.group_indicators(kb)
-    pemicu = [k for k in groups if k.startswith("Pemicu")]
-    waktu = [k for k in groups if k.startswith("Waktu")]
-    gejala = [k for k in GEJALA_ORDER if k in groups]
+
+    def kode_awal(kat: str) -> str:
+        return groups[kat]["kode"].min()
+
+    # Bagian form diurutkan mengikuti kode indikator (G001, G002, ...), bukan urutan tetap.
+    bagian = [
+        ("Gejala apa yang kamu rasakan?", "Centang semua yang sesuai.",
+         [k for k in groups if not k.startswith(("Pemicu", "Waktu"))]),
+        ("Apa yang terjadi sebelum gejala muncul?", "Centang pemicu yang kamu curigai.",
+         [k for k in groups if k.startswith("Pemicu")]),
+        ("Kapan gejala muncul setelah terpapar?", "Seberapa cepat gejala terasa.",
+         [k for k in groups if k.startswith("Waktu")]),
+    ]
+    bagian = [(t, h, sorted(ks, key=kode_awal)) for t, h, ks in bagian if ks]
+    bagian.sort(key=lambda b: kode_awal(b[2][0]))
 
     def box(kat: str) -> None:
-        df = groups[kat]
+        df = groups[kat].sort_values("kode")
         with st.container(border=True):
-            st.markdown(f'<div class="grp">{kat_label(kat)}<small>{len(df)} pilihan</small></div>', unsafe_allow_html=True)
-            cols = st.columns(2)
-            for i, (_, row) in enumerate(df.iterrows()):
-                with cols[i % 2]:
-                    st.checkbox(row["nama"], key=f"g_{row['kode']}")
+            st.markdown(f'<div class="grp">{kat_label(kat)}<small>{df["kode"].iloc[0]}–{df["kode"].iloc[-1]} · {len(df)} pilihan</small></div>',
+                        unsafe_allow_html=True)
+            for _, row in df.iterrows():  # satu kolom supaya urutan kode terbaca lurus (juga di HP)
+                st.checkbox(f"`{row['kode']}` {row['nama']}", key=f"g_{row['kode']}")
 
     with st.form("konsultasi", border=False):
-        st.markdown(T.step(1, "Apa yang terjadi sebelum gejala muncul?", "Centang pemicu yang kamu curigai."), unsafe_allow_html=True)
-        for k in pemicu:
-            box(k)
-        st.markdown(T.step(2, "Kapan gejala muncul setelah terpapar?", "Seberapa cepat gejala terasa."), unsafe_allow_html=True)
-        for k in waktu:
-            box(k)
-        st.markdown(T.step(3, "Gejala apa yang kamu rasakan?", "Centang semua yang sesuai."), unsafe_allow_html=True)
-        for k in gejala:
-            box(k)
+        for no, (judul, petunjuk, kategori) in enumerate(bagian, start=1):
+            st.markdown(T.step(no, judul, petunjuk), unsafe_allow_html=True)
+            for k in kategori:
+                box(k)
         submitted = st.form_submit_button("Hitung kemungkinan", type="primary")
 
     if submitted:
@@ -176,7 +179,7 @@ def render_result() -> None:
                    "Nilainya cenderung naik bila banyak aturan terpenuhi.")
     with right:
         st.subheader("Yang kamu pilih")
-        st.markdown(f'<div class="rankbox">{T.answers_summary([(names[g], "Dipilih") for g in h["selected"]])}</div>',
+        st.markdown(f'<div class="rankbox">{T.answers_summary([(f"{g} · {names[g]}", "Dipilih") for g in sorted(h["selected"])])}</div>',
                     unsafe_allow_html=True)
 
     st.subheader("Rincian dan penjelasan")
@@ -185,7 +188,7 @@ def render_result() -> None:
             st.markdown(T.meta_chips(r), unsafe_allow_html=True)
             st.markdown(f"**Penanganan umum (dari data sumber):** {r.penanganan}")
             st.markdown("**Aturan yang terpenuhi oleh pilihanmu**")
-            df = pd.DataFrame([{"Aturan": f["aturan"], "Jika (indikator)": f["indikator"],
+            df = pd.DataFrame([{"Aturan": f["aturan"], "Kode": f["g"], "Jika (indikator)": f["indikator"],
                                 "Bobot aturan": f"{f['cf']:.2f}", "Keyakinanmu": f"{f['cf_user']:.1f}",
                                 "CF aturan": f"{f['cf_aturan']:.3f}"} for f in r.fired]).set_index("Aturan")
             st.table(df)
